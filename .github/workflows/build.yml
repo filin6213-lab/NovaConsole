@@ -1,0 +1,48 @@
+name: Build Windows exe
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack project zip
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Path . -Filter *.zip -File | Select-Object -First 1
+          if (-not $zip) { throw "В корне репозитория нет zip-архива с проектом" }
+          Write-Host "Распаковываю $($zip.Name)"
+          Expand-Archive -Path $zip.FullName -DestinationPath proj -Force
+          $pj = Get-ChildItem -Path proj -Recurse -Filter package.json | Where-Object { $_.FullName -notmatch 'node_modules' } | Select-Object -First 1
+          if (-not $pj) { throw "В архиве не найден package.json" }
+          Write-Host "Проект: $($pj.DirectoryName)"
+          "APPDIR=$($pj.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: ${{ env.APPDIR }}
+        run: npm install --no-audit --no-fund
+
+      - name: Build exe
+        working-directory: ${{ env.APPDIR }}
+        run: npm run dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: NovaConsole-windows
+          path: ${{ env.APPDIR }}/dist/*.exe
+          if-no-files-found: error
